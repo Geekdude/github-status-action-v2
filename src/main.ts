@@ -1,6 +1,13 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import makeStatusRequest, { StatusRequest } from "./makeStatusRequest";
+import createStatusWithRetry from "./createStatus";
+import inputNames from "./inputNames";
+
+function parsePositiveInt(value: string, fallback: number): number {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 async function run(): Promise<void> {
   const authToken: string = core.getInput("authToken");
@@ -30,12 +37,17 @@ async function run(): Promise<void> {
     return;
   }
 
+  const retries = parsePositiveInt(core.getInput(inputNames.retries), 3);
+  const retryDelaySeconds = parsePositiveInt(core.getInput(inputNames.retryDelaySeconds), 5);
+  const timeoutSeconds = parsePositiveInt(core.getInput(inputNames.timeoutSeconds), 30);
+
   try {
-    await octokit.rest.repos.createCommitStatus(statusRequest);
+    await createStatusWithRetry(octokit, statusRequest, { retries, retryDelaySeconds, timeoutSeconds });
   } catch (error) {
     if (error instanceof Error) {
       core.setFailed(
         `Github returned error "${error.message}" when setting status on commit: ${statusRequest.sha}\n` +
+          ` after ${retries} attempt(s).\n` +
           ` Request object:\n` +
           ` ${JSON.stringify(statusRequest, null, 2)}` +
           ` Possible issues could be that the token used does not have access to the repository containing the commit or the commit/repository does not exist.`,

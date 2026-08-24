@@ -9,7 +9,7 @@ inputs:
     description: 'Use secrets.GITHUB_TOKEN or your own token if you need to trigger other workflows the use "on: status"'
     required: true  
   state:
-    description: 'The status of the check: success, error, failure or pending'
+    description: 'The status of the check: success, error, failure, pending, or cancelled (mapped to error, since GitHub has no cancelled state)'
     required: true
   context:
     description: 'The context, this is displayed as the name of the check'
@@ -31,8 +31,20 @@ inputs:
     description: 'SHA of commit to update status on, defaults to context github.sha'
     default: ${{ github.sha }}
     required: false
-  target_url: 
+  target_url:
     description: 'URL/URI to use for further details.'
+    required: false
+  retries:
+    description: 'Number of attempts to post the status before failing the step'
+    default: '3'
+    required: false
+  retryDelaySeconds:
+    description: 'Delay in seconds between retry attempts'
+    default: '5'
+    required: false
+  timeoutSeconds:
+    description: 'Per-attempt request timeout in seconds'
+    default: '30'
     required: false
 runs:
   using: 'node24'

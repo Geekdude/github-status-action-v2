@@ -73,6 +73,17 @@ const actionsCoreAlt3: CoreActionsForTesting = {
   },
 };
 
+const actionsCoreCancelled: CoreActionsForTesting = {
+  getInput: (arg: string) => {
+    switch (arg) {
+      case inputNames.state:
+        return "cancelled" as CommitState;
+      default:
+        return actionsCore.getInput(arg);
+    }
+  },
+};
+
 test("should getInput context", (t) => {
   t.is(makeStatusRequest(actionsCore).context, INPUT_CONTEXT);
 });
@@ -107,4 +118,8 @@ test("when owner is not a valid GitHub username, should throw", (t) => {
 test("should validate state", (t) => {
   const err = t.throws(() => makeStatusRequest(actionsCoreAlt3));
   t.is(err.message, ERR_INVALID_STATE);
+});
+
+test("cancelled state is accepted and mapped to error", (t) => {
+  t.is(makeStatusRequest(actionsCoreCancelled).state, "error");
 });

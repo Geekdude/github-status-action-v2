@@ -23,7 +23,9 @@ Adds a status update to a commit. GitHub will always show the latest state of a 
 - `authToken` (required)  
   Use secrets.GITHUB_TOKEN or your own token if you need to trigger other workflows that use "on: status"
 - `state` (required)  
-  The status of the check should only be `success`, `error`, `failure` or `pending`
+  The status of the check should only be `success`, `error`, `failure`, `pending`, or `cancelled`.
+  `cancelled` is accepted as an input but mapped to `error` before it reaches GitHub, since
+  GitHub's commit-status API has no `cancelled` state of its own.
 - `context`  
   The context, is displayed as the name of the check
 - `description`  
@@ -37,6 +39,16 @@ Adds a status update to a commit. GitHub will always show the latest state of a 
   \*If using `on: pull_request` use `github.event.pull_request.head.sha`
 - `target_url`  
   Url to use for the details link. If omitted no link is shown.
+- `retries`  
+  Number of attempts to post the status before failing the step. Defaults to `3`.
+- `retryDelaySeconds`  
+  Delay in seconds between retry attempts. Defaults to `5`.
+- `timeoutSeconds`  
+  Per-attempt request timeout in seconds. Defaults to `30`.
+
+### Outputs
+
+None.
 
 ## Local Debugging with @github/local-action
 
