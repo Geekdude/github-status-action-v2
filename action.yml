@@ -35,11 +35,11 @@ inputs:
     description: 'URL/URI to use for further details.'
     required: false
   retries:
-    description: 'Number of attempts to post the status before failing the step'
+    description: 'Number of retries after a failed attempt, up to retries + 1 requests in total, as with curl --retry N. Only transient failures (network, timeout, 408, 429, 5xx) are retried; a 4xx fails immediately'
     default: '3'
     required: false
   retryDelaySeconds:
-    description: 'Delay in seconds between retry attempts'
+    description: 'Delay in seconds between retry attempts, 0 for no delay'
     default: '5'
     required: false
   timeoutSeconds:

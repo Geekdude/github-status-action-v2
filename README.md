@@ -40,11 +40,19 @@ Adds a status update to a commit. GitHub will always show the latest state of a 
 - `target_url`  
   Url to use for the details link. If omitted no link is shown.
 - `retries`  
-  Number of attempts to post the status before failing the step. Defaults to `3`.
+  Number of retries after a failed attempt, so the step makes up to `retries + 1`
+  requests in total (the same counting as `curl --retry N`). Defaults to `3`.
+  Set to `0` to attempt the request once and fail.
+  Only transient failures are retried: network errors, the per-attempt timeout
+  firing, `408`, `429`, and any `5xx`. A `4xx` such as `403 Resource not
+  accessible by integration` or `422` fails the step immediately, since another
+  identical request cannot succeed.
 - `retryDelaySeconds`  
-  Delay in seconds between retry attempts. Defaults to `5`.
+  Delay in seconds between retry attempts. Defaults to `5`. `0` is valid and
+  retries with no delay.
 - `timeoutSeconds`  
-  Per-attempt request timeout in seconds. Defaults to `30`.
+  Per-attempt request timeout in seconds, applied as a fresh `AbortSignal` on
+  every attempt. Defaults to `30`.
 
 ### Outputs
 

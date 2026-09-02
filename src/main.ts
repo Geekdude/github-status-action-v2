@@ -4,9 +4,9 @@ import makeStatusRequest, { StatusRequest } from "./makeStatusRequest";
 import createStatusWithRetry from "./createStatus";
 import inputNames from "./inputNames";
 
-function parsePositiveInt(value: string, fallback: number): number {
+function parseIntInput(value: string, fallback: number, min: number): number {
   const parsed = parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Number.isFinite(parsed) && parsed >= min ? parsed : fallback;
 }
 
 async function run(): Promise<void> {
@@ -37,9 +37,11 @@ async function run(): Promise<void> {
     return;
   }
 
-  const retries = parsePositiveInt(core.getInput(inputNames.retries), 3);
-  const retryDelaySeconds = parsePositiveInt(core.getInput(inputNames.retryDelaySeconds), 5);
-  const timeoutSeconds = parsePositiveInt(core.getInput(inputNames.timeoutSeconds), 30);
+  // 0 retries and 0 delay are both valid configurations; only the timeout has
+  // to be positive, since a 0ms AbortSignal aborts before the request starts.
+  const retries = parseIntInput(core.getInput(inputNames.retries), 3, 0);
+  const retryDelaySeconds = parseIntInput(core.getInput(inputNames.retryDelaySeconds), 5, 0);
+  const timeoutSeconds = parseIntInput(core.getInput(inputNames.timeoutSeconds), 30, 1);
 
   try {
     await createStatusWithRetry(octokit, statusRequest, { retries, retryDelaySeconds, timeoutSeconds });
@@ -47,7 +49,7 @@ async function run(): Promise<void> {
     if (error instanceof Error) {
       core.setFailed(
         `Github returned error "${error.message}" when setting status on commit: ${statusRequest.sha}\n` +
-          ` after ${retries} attempt(s).\n` +
+          ` after ${retries + 1} attempt(s).\n` +
           ` Request object:\n` +
           ` ${JSON.stringify(statusRequest, null, 2)}` +
           ` Possible issues could be that the token used does not have access to the repository containing the commit or the commit/repository does not exist.`,
