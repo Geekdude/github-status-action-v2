@@ -35,15 +35,15 @@ inputs:
     description: 'URL/URI to use for further details.'
     required: false
   retries:
-    description: 'Number of retries after a failed attempt, up to retries + 1 requests in total, as with curl --retry N. Only transient failures (network, timeout, 408, 429, 5xx) are retried; a 4xx fails immediately'
+    description: 'Number of retries after a failed attempt, up to retries + 1 requests in total, as with curl --retry N. Only transient failures (network, timeout, 408, 429, 5xx) are retried; a 4xx fails immediately. Must be between 0 and 10; out-of-range values fall back to the default'
     default: '3'
     required: false
   retryDelaySeconds:
-    description: 'Delay in seconds between retry attempts, 0 for no delay'
+    description: 'Delay in seconds between retry attempts, 0 for no delay. Must be between 0 and 300; out-of-range values fall back to the default'
     default: '5'
     required: false
   timeoutSeconds:
-    description: 'Per-attempt request timeout in seconds'
+    description: 'Per-attempt request timeout in seconds. Must be between 1 and 300; out-of-range values fall back to the default'
     default: '30'
     required: false
 runs:
