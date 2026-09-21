@@ -2,13 +2,9 @@ import * as core from "@actions/core";
 import makeStatusRequest, { StatusRequest } from "./makeStatusRequest";
 import createStatusWithRetry from "./createStatus";
 import inputNames from "./inputNames";
+import parseIntInput from "./parseIntInput";
 
 declare function require(id: string): any;
-
-function parseIntInput(value: string, fallback: number, min: number, max: number): number {
-  const parsed = parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
-}
 
 async function run(): Promise<void> {
   const authToken: string = core.getInput("authToken");
@@ -58,7 +54,7 @@ async function run(): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     core.setFailed(
-      `Github returned error "${message}" when setting status on commit: ${statusRequest.sha}\n` +
+      `GitHub returned error "${message}" when setting status on commit: ${statusRequest.sha}\n` +
         ` Configured retry limit: ${retries} retry attempt(s).\n` +
         ` Request object:\n` +
         ` ${JSON.stringify(statusRequest, null, 2)}` +

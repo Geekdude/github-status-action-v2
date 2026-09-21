@@ -19,6 +19,64 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.isTransient = isTransient;
 exports["default"] = createStatusWithRetry;
 const defaultSleep = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+function getHeader(headers, name) {
+    if (!headers) {
+        return undefined;
+    }
+    const key = Object.keys(headers).find((headerName) => headerName.toLowerCase() === name);
+    const value = key ? headers[key] : undefined;
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (Array.isArray(value)) {
+        return value[0];
+    }
+    if (typeof value === 'number') {
+        return String(value);
+    }
+    return undefined;
+}
+function getRateLimitHeaders(error) {
+    var _a, _b;
+    const statusError = error;
+    return (_b = (_a = statusError === null || statusError === void 0 ? void 0 : statusError.response) === null || _a === void 0 ? void 0 : _a.headers) !== null && _b !== void 0 ? _b : statusError === null || statusError === void 0 ? void 0 : statusError.headers;
+}
+function getRateLimitDelaySeconds(error) {
+    const headers = getRateLimitHeaders(error);
+    const retryAfter = getHeader(headers, 'retry-after');
+    if (retryAfter) {
+        const seconds = Number(retryAfter);
+        if (Number.isFinite(seconds) && seconds >= 0) {
+            return Math.ceil(seconds);
+        }
+        const retryDate = Date.parse(retryAfter);
+        if (Number.isFinite(retryDate)) {
+            return Math.max(0, Math.ceil((retryDate - Date.now()) / 1000));
+        }
+    }
+    const resetAt = getHeader(headers, 'x-ratelimit-reset');
+    if (!resetAt) {
+        return undefined;
+    }
+    const resetSeconds = Number(resetAt);
+    if (!Number.isFinite(resetSeconds)) {
+        return undefined;
+    }
+    const currentDateHeader = getHeader(headers, 'date');
+    const currentTimeSeconds = currentDateHeader ? Date.parse(currentDateHeader) / 1000 : Date.now() / 1000;
+    return Math.max(0, Math.ceil(resetSeconds - currentTimeSeconds));
+}
+function isRateLimited(error) {
+    const status = error === null || error === void 0 ? void 0 : error.status;
+    if (status === 429) {
+        return true;
+    }
+    if (status !== 403) {
+        return false;
+    }
+    const headers = getRateLimitHeaders(error);
+    return getHeader(headers, 'x-ratelimit-remaining') === '0' || getRateLimitDelaySeconds(error) !== undefined;
+}
 /**
  * Only transient failures are worth another attempt. Octokit's own retry plugin
  * draws the same line: retry network/timeout errors and 5xx, never a 4xx that
@@ -30,10 +88,11 @@ function isTransient(error) {
     if (typeof status !== 'number') {
         return true; // network error, or the per-attempt AbortSignal firing
     }
-    return status === 408 || status === 429 || status >= 500;
+    return status === 408 || isRateLimited(error) || status >= 500;
 }
 function createStatusWithRetry(octokit_1, statusRequest_1, options_1) {
     return __awaiter(this, arguments, void 0, function* (octokit, statusRequest, options, sleep = defaultSleep) {
+        var _a;
         const { retries, retryDelaySeconds, timeoutSeconds } = options;
         // `retries` counts retries, not total requests, matching `curl --retry N`.
         const attempts = retries + 1;
@@ -49,7 +108,7 @@ function createStatusWithRetry(octokit_1, statusRequest_1, options_1) {
                 }
                 lastError = error;
                 if (attempt < attempts) {
-                    yield sleep(retryDelaySeconds);
+                    yield sleep((_a = getRateLimitDelaySeconds(error)) !== null && _a !== void 0 ? _a : retryDelaySeconds);
                 }
             }
         }
@@ -140,10 +199,7 @@ const core = __importStar(__nccwpck_require__(7484));
 const makeStatusRequest_1 = __importDefault(__nccwpck_require__(9565));
 const createStatus_1 = __importDefault(__nccwpck_require__(9400));
 const inputNames_1 = __importDefault(__nccwpck_require__(6678));
-function parseIntInput(value, fallback, min, max) {
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
-}
+const parseIntInput_1 = __importDefault(__nccwpck_require__(5860));
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         const authToken = core.getInput("authToken");
@@ -180,15 +236,15 @@ function run() {
         // to be positive, since a 0ms AbortSignal aborts before the request starts.
         // Upper bounds guard against a mistyped input (e.g. "300" instead of "30")
         // turning a single step into an hours-long hang.
-        const retries = parseIntInput(core.getInput(inputNames_1.default.retries), 3, 0, 10);
-        const retryDelaySeconds = parseIntInput(core.getInput(inputNames_1.default.retryDelaySeconds), 5, 0, 300);
-        const timeoutSeconds = parseIntInput(core.getInput(inputNames_1.default.timeoutSeconds), 30, 1, 300);
+        const retries = (0, parseIntInput_1.default)(core.getInput(inputNames_1.default.retries), 3, 0, 10);
+        const retryDelaySeconds = (0, parseIntInput_1.default)(core.getInput(inputNames_1.default.retryDelaySeconds), 5, 0, 300);
+        const timeoutSeconds = (0, parseIntInput_1.default)(core.getInput(inputNames_1.default.timeoutSeconds), 30, 1, 300);
         try {
             yield (0, createStatus_1.default)(octokit, statusRequest, { retries, retryDelaySeconds, timeoutSeconds });
         }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            core.setFailed(`Github returned error "${message}" when setting status on commit: ${statusRequest.sha}\n` +
+            core.setFailed(`GitHub returned error "${message}" when setting status on commit: ${statusRequest.sha}\n` +
                 ` Configured retry limit: ${retries} retry attempt(s).\n` +
                 ` Request object:\n` +
                 ` ${JSON.stringify(statusRequest, null, 2)}` +
@@ -284,6 +340,24 @@ function validateState(state) {
         state == "failure" ||
         state == "pending" ||
         state == "cancelled");
+}
+
+
+/***/ }),
+
+/***/ 5860:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports["default"] = parseIntInput;
+function parseIntInput(value, fallback, min, max) {
+    if (!/^-?\d+$/.test(value)) {
+        return fallback;
+    }
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
 

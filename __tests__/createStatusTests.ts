@@ -23,8 +23,11 @@ function makeOctokit(behaviors: Array<() => void>) {
 }
 
 /** An octokit error carries the HTTP status the retry loop keys off. */
-function httpError(status: number): Error {
-    return Object.assign(new Error(`HTTP ${status}`), { status });
+function httpError(
+    status: number,
+    headers?: Record<string, string | string[] | number | undefined>
+): Error {
+    return Object.assign(new Error(`HTTP ${status}`), { status, response: { headers } });
 }
 
 test("succeeds on the first attempt without retrying", async t => {
@@ -108,6 +111,18 @@ test("does not retry a permission error, which would fail identically", async t 
     t.is(requests.length, 1);
 });
 
+test("retries a 403 rate-limit response when GitHub includes rate-limit headers", async t => {
+    const { octokit, requests } = makeOctokit([
+        () => { throw httpError(403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1010", date: "Thu, 01 Jan 1970 00:16:40 GMT" }); },
+        () => {}
+    ]);
+    await createStatusWithRetry(
+        octokit, STATUS_REQUEST, { retries: 3, retryDelaySeconds: 0, timeoutSeconds: 30 },
+        NO_DELAY
+    );
+    t.is(requests.length, 2);
+});
+
 test("does not retry a 422, and does retry a 500 and a 429", async t => {
     for (const status of [404, 422]) {
         const { octokit, requests } = makeOctokit([() => { throw httpError(status); }, () => {}]);
@@ -121,6 +136,19 @@ test("does not retry a 422, and does retry a 500 and a 429", async t => {
         await createStatusWithRetry(octokit, STATUS_REQUEST, { retries: 3, retryDelaySeconds: 0, timeoutSeconds: 30 }, NO_DELAY);
         t.is(requests.length, 2, `${status} should be retried`);
     }
+});
+
+test("uses GitHub's rate-limit delay instead of the configured retry delay", async t => {
+    const delays: number[] = [];
+    const { octokit } = makeOctokit([
+        () => { throw httpError(429, { "retry-after": "17" }); },
+        () => {}
+    ]);
+    await createStatusWithRetry(
+        octokit, STATUS_REQUEST, { retries: 3, retryDelaySeconds: 5, timeoutSeconds: 30 },
+        async (seconds) => { delays.push(seconds); }
+    );
+    t.deepEqual(delays, [17]);
 });
 
 // Serial: this patches a global, and AVA runs serial tests alone, before the rest.
