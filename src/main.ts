@@ -49,7 +49,7 @@ async function run(): Promise<void> {
     if (error instanceof Error) {
       core.setFailed(
         `Github returned error "${error.message}" when setting status on commit: ${statusRequest.sha}\n` +
-          ` after ${retries + 1} attempt(s).\n` +
+          ` Configured retry limit: ${retries} retry attempt(s).\n` +
           ` Request object:\n` +
           ` ${JSON.stringify(statusRequest, null, 2)}` +
           ` Possible issues could be that the token used does not have access to the repository containing the commit or the commit/repository does not exist.`,
