@@ -1,8 +1,9 @@
 import * as core from "@actions/core";
-import * as github from "@actions/github";
 import makeStatusRequest, { StatusRequest } from "./makeStatusRequest";
 import createStatusWithRetry from "./createStatus";
 import inputNames from "./inputNames";
+
+declare function require(id: string): any;
 
 function parseIntInput(value: string, fallback: number, min: number, max: number): number {
   const parsed = parseInt(value, 10);
@@ -14,7 +15,14 @@ async function run(): Promise<void> {
   let octokit: any | null = null;
 
   try {
-    octokit = github.getOctokit(authToken);
+    // Routed through a plain-JS loader (see ../loadOctokit.cjs) so the
+    // dynamic import() of the ESM-only @actions/github reaches the bundler
+    // unmodified instead of being downleveled to an unresolvable require().
+    const { loadGetOctokit } = require("../loadOctokit.cjs") as {
+      loadGetOctokit: () => Promise<(token: string) => any>;
+    };
+    const getOctokit = await loadGetOctokit();
+    octokit = getOctokit(authToken);
   } catch (error) {
     if (error instanceof Error) {
       core.setFailed("Error creating octokit:\n" + error.message);
