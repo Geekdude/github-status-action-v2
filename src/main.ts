@@ -4,25 +4,16 @@ import createStatusWithRetry from "./createStatus";
 import inputNames from "./inputNames";
 import parseIntInput from "./parseIntInput";
 
-declare function require(id: string): any;
-
 async function run(): Promise<void> {
   const authToken: string = core.getInput("authToken");
   let octokit: any | null = null;
 
   try {
-    // Routed through a plain-JS loader (see ../loadOctokit.cjs) so the
-    // dynamic import() of the ESM-only @actions/github reaches the bundler
-    // unmodified instead of being downleveled to an unresolvable require().
-    const { loadGetOctokit } = require("../loadOctokit.cjs") as {
-      loadGetOctokit: () => Promise<(token: string) => any>;
-    };
-    const getOctokit = await loadGetOctokit();
+    const { getOctokit } = await import("@actions/github");
     octokit = getOctokit(authToken);
   } catch (error) {
-    if (error instanceof Error) {
-      core.setFailed("Error creating octokit:\n" + error.message);
-    }
+    const message = error instanceof Error ? error.message : String(error);
+    core.setFailed("Error creating octokit:\n" + message);
     return;
   }
 
@@ -31,13 +22,14 @@ async function run(): Promise<void> {
     return;
   }
 
+  const originalStateInput = core.getInput(inputNames.state);
+
   let statusRequest: StatusRequest;
   try {
     statusRequest = makeStatusRequest();
   } catch (error) {
-    if (error instanceof Error) {
-      core.setFailed(`Error creating status request object: ${error.message}`);
-    }
+    const message = error instanceof Error ? error.message : String(error);
+    core.setFailed(`Error creating status request object: ${message}`);
     return;
   }
 
@@ -53,9 +45,13 @@ async function run(): Promise<void> {
     await createStatusWithRetry(octokit, statusRequest, { retries, retryDelaySeconds, timeoutSeconds });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const attemptsMade = (error as { attemptsMade?: number } | undefined)?.attemptsMade ?? 1;
     core.setFailed(
       `GitHub returned error "${message}" when setting status on commit: ${statusRequest.sha}\n` +
-        ` Configured retry limit: ${retries} retry attempt(s).\n` +
+        ` Failed after ${attemptsMade} attempt(s) (configured retry limit: ${retries}).\n` +
+        (originalStateInput !== statusRequest.state
+          ? ` Input state "${originalStateInput}" was mapped to "${statusRequest.state}".\n`
+          : "") +
         ` Request object:\n` +
         ` ${JSON.stringify(statusRequest, null, 2)}` +
         ` Possible issues could be that the token used does not have access to the repository containing the commit or the commit/repository does not exist.`,

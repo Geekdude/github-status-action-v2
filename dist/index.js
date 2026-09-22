@@ -19,6 +19,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.isTransient = isTransient;
 exports["default"] = createStatusWithRetry;
 const defaultSleep = (seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+// Never wait longer than retryDelaySeconds' own upper bound (see main.ts), so
+// a large or misconfigured Retry-After / x-ratelimit-reset can't reopen the
+// hang that bound is meant to prevent.
+const MAX_RATE_LIMIT_DELAY_SECONDS = 300;
 function getHeader(headers, name) {
     if (!headers) {
         return undefined;
@@ -37,9 +41,9 @@ function getHeader(headers, name) {
     return undefined;
 }
 function getRateLimitHeaders(error) {
-    var _a, _b;
+    var _a;
     const statusError = error;
-    return (_b = (_a = statusError === null || statusError === void 0 ? void 0 : statusError.response) === null || _a === void 0 ? void 0 : _a.headers) !== null && _b !== void 0 ? _b : statusError === null || statusError === void 0 ? void 0 : statusError.headers;
+    return (_a = statusError === null || statusError === void 0 ? void 0 : statusError.response) === null || _a === void 0 ? void 0 : _a.headers;
 }
 function getRateLimitDelaySeconds(error) {
     const headers = getRateLimitHeaders(error);
@@ -47,11 +51,11 @@ function getRateLimitDelaySeconds(error) {
     if (retryAfter) {
         const seconds = Number(retryAfter);
         if (Number.isFinite(seconds) && seconds >= 0) {
-            return Math.ceil(seconds);
+            return Math.min(Math.ceil(seconds), MAX_RATE_LIMIT_DELAY_SECONDS);
         }
         const retryDate = Date.parse(retryAfter);
         if (Number.isFinite(retryDate)) {
-            return Math.max(0, Math.ceil((retryDate - Date.now()) / 1000));
+            return Math.min(Math.max(0, Math.ceil((retryDate - Date.now()) / 1000)), MAX_RATE_LIMIT_DELAY_SECONDS);
         }
     }
     if (getHeader(headers, 'x-ratelimit-remaining') !== '0') {
@@ -67,7 +71,7 @@ function getRateLimitDelaySeconds(error) {
     }
     const currentDateHeader = getHeader(headers, 'date');
     const currentTimeSeconds = currentDateHeader ? Date.parse(currentDateHeader) / 1000 : Date.now() / 1000;
-    return Math.max(0, Math.ceil(resetSeconds - currentTimeSeconds));
+    return Math.min(Math.max(0, Math.ceil(resetSeconds - currentTimeSeconds)), MAX_RATE_LIMIT_DELAY_SECONDS);
 }
 function isRateLimited(error) {
     const status = error === null || error === void 0 ? void 0 : error.status;
@@ -93,6 +97,12 @@ function isTransient(error) {
     }
     return status === 408 || isRateLimited(error) || status >= 500;
 }
+function withAttemptsMade(error, attemptsMade) {
+    if (error && typeof error === 'object') {
+        error.attemptsMade = attemptsMade;
+    }
+    return error;
+}
 function createStatusWithRetry(octokit_1, statusRequest_1, options_1) {
     return __awaiter(this, arguments, void 0, function* (octokit, statusRequest, options, sleep = defaultSleep) {
         var _a;
@@ -102,12 +112,12 @@ function createStatusWithRetry(octokit_1, statusRequest_1, options_1) {
         let lastError;
         for (let attempt = 1; attempt <= attempts; attempt++) {
             try {
-                yield octokit.rest.repos.createCommitStatus(Object.assign(Object.assign({}, statusRequest), { request: { signal: AbortSignal.timeout(timeoutSeconds * 1000) } }));
+                yield octokit.rest.repos.createCommitStatus(Object.assign(Object.assign({}, statusRequest), { request: Object.assign(Object.assign({}, statusRequest.request), { signal: AbortSignal.timeout(timeoutSeconds * 1000) }) }));
                 return;
             }
             catch (error) {
                 if (!isTransient(error)) {
-                    throw error;
+                    throw withAttemptsMade(error, attempt);
                 }
                 lastError = error;
                 if (attempt < attempts) {
@@ -115,7 +125,7 @@ function createStatusWithRetry(octokit_1, statusRequest_1, options_1) {
                 }
             }
         }
-        throw lastError;
+        throw withAttemptsMade(lastError, attempts);
     });
 }
 
@@ -205,34 +215,30 @@ const inputNames_1 = __importDefault(__nccwpck_require__(6678));
 const parseIntInput_1 = __importDefault(__nccwpck_require__(5860));
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const authToken = core.getInput("authToken");
         let octokit = null;
         try {
-            // Routed through a plain-JS loader (see ../loadOctokit.cjs) so the
-            // dynamic import() of the ESM-only @actions/github reaches the bundler
-            // unmodified instead of being downleveled to an unresolvable require().
-            const { loadGetOctokit } = __nccwpck_require__(8312);
-            const getOctokit = yield loadGetOctokit();
+            const { getOctokit } = yield __nccwpck_require__.e(/* import() */ 474).then(__nccwpck_require__.bind(__nccwpck_require__, 6474));
             octokit = getOctokit(authToken);
         }
         catch (error) {
-            if (error instanceof Error) {
-                core.setFailed("Error creating octokit:\n" + error.message);
-            }
+            const message = error instanceof Error ? error.message : String(error);
+            core.setFailed("Error creating octokit:\n" + message);
             return;
         }
         if (octokit == null) {
             core.setFailed("Error creating octokit:\noctokit was null");
             return;
         }
+        const originalStateInput = core.getInput(inputNames_1.default.state);
         let statusRequest;
         try {
             statusRequest = (0, makeStatusRequest_1.default)();
         }
         catch (error) {
-            if (error instanceof Error) {
-                core.setFailed(`Error creating status request object: ${error.message}`);
-            }
+            const message = error instanceof Error ? error.message : String(error);
+            core.setFailed(`Error creating status request object: ${message}`);
             return;
         }
         // 0 retries and 0 delay are both valid configurations; only the timeout has
@@ -247,8 +253,12 @@ function run() {
         }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            const attemptsMade = (_a = error === null || error === void 0 ? void 0 : error.attemptsMade) !== null && _a !== void 0 ? _a : 1;
             core.setFailed(`GitHub returned error "${message}" when setting status on commit: ${statusRequest.sha}\n` +
-                ` Configured retry limit: ${retries} retry attempt(s).\n` +
+                ` Failed after ${attemptsMade} attempt(s) (configured retry limit: ${retries}).\n` +
+                (originalStateInput !== statusRequest.state
+                    ? ` Input state "${originalStateInput}" was mapped to "${statusRequest.state}".\n`
+                    : "") +
                 ` Request object:\n` +
                 ` ${JSON.stringify(statusRequest, null, 2)}` +
                 ` Possible issues could be that the token used does not have access to the repository containing the commit or the commit/repository does not exist.`);
@@ -360,7 +370,7 @@ function parseIntInput(value, fallback, min, max) {
         return fallback;
     }
     const parsed = Number(value);
-    return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+    return parsed >= min && parsed <= max ? parsed : fallback;
 }
 
 
@@ -32172,28 +32182,6 @@ module.exports = require("tls");
 "use strict";
 module.exports = require("util");
 
-/***/ }),
-
-/***/ 8312:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-// Plain, hand-written CommonJS (deliberately outside src/, untouched by tsc)
-// so this dynamic import() reaches the bundler as a real ESM import, not a
-// downleveled `require()`. TypeScript's `--module commonjs` output always
-// rewrites `await import(...)` into `Promise.resolve().then(() =>
-// require(...))`, and `require()` cannot load `@actions/github`, which has
-// been ESM-only (no "require" export condition) since v9. Keeping this one
-// line outside tsc's pipeline lets ncc bundle @actions/github's ESM build
-// directly into dist/index.js instead of failing to resolve it.
-module.exports.loadGetOctokit = async function loadGetOctokit() {
-  const { getOctokit } = await __nccwpck_require__.e(/* import() */ 474).then(__nccwpck_require__.bind(__nccwpck_require__, 6474));
-  return getOctokit;
-};
-
-
 /***/ })
 
 /******/ 	});
@@ -32272,6 +32260,17 @@ module.exports.loadGetOctokit = async function loadGetOctokit() {
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
 /******/ 	(() => {
 /******/ 		__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/make namespace object */
+/******/ 	(() => {
+/******/ 		// define __esModule on exports
+/******/ 		__nccwpck_require__.r = (exports) => {
+/******/ 			if(typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+/******/ 				Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+/******/ 			}
+/******/ 			Object.defineProperty(exports, '__esModule', { value: true });
+/******/ 		};
 /******/ 	})();
 /******/ 	
 /******/ 	/* webpack/runtime/require chunk loading */

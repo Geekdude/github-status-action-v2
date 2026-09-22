@@ -4,5 +4,5 @@ export default function parseIntInput(value: string, fallback: number, min: numb
   }
 
   const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+  return parsed >= min && parsed <= max ? parsed : fallback;
 }

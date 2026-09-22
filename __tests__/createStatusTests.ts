@@ -151,6 +151,46 @@ test("uses GitHub's rate-limit delay instead of the configured retry delay", asy
     t.deepEqual(delays, [17]);
 });
 
+test("caps a huge retry-after instead of hanging for it in full", async t => {
+    const delays: number[] = [];
+    const { octokit } = makeOctokit([
+        () => { throw httpError(429, { "retry-after": "999999999" }); },
+        () => {}
+    ]);
+    await createStatusWithRetry(
+        octokit, STATUS_REQUEST, { retries: 3, retryDelaySeconds: 5, timeoutSeconds: 30 },
+        async (seconds) => { delays.push(seconds); }
+    );
+    t.deepEqual(delays, [300]);
+});
+
+test("attaches how many attempts were actually made to the thrown error", async t => {
+    const { octokit } = makeOctokit([
+        () => { throw new Error("attempt 1"); },
+        () => { throw new Error("attempt 2"); },
+    ]);
+    const err = await t.throwsAsync(() =>
+        createStatusWithRetry(octokit, STATUS_REQUEST, { retries: 1, retryDelaySeconds: 0, timeoutSeconds: 30 }, NO_DELAY)
+    );
+    t.is((err as any).attemptsMade, 2);
+});
+
+test("attaches a single attempt when a non-transient error short-circuits", async t => {
+    const { octokit } = makeOctokit([() => { throw httpError(403); }]);
+    const err = await t.throwsAsync(() =>
+        createStatusWithRetry(octokit, STATUS_REQUEST, { retries: 3, retryDelaySeconds: 0, timeoutSeconds: 30 }, NO_DELAY)
+    );
+    t.is((err as any).attemptsMade, 1);
+});
+
+test("preserves a caller's own request options instead of overwriting them", async t => {
+    const requestWithOptions = { ...STATUS_REQUEST, request: { parseSuccessResponseBody: false } } as StatusRequest;
+    const { octokit, requests } = makeOctokit([() => {}]);
+    await createStatusWithRetry(octokit, requestWithOptions, { retries: 0, retryDelaySeconds: 0, timeoutSeconds: 30 }, NO_DELAY);
+    t.is(requests[0].request.parseSuccessResponseBody, false);
+    t.true(requests[0].request.signal instanceof AbortSignal);
+});
+
 // Serial: this patches a global, and AVA runs serial tests alone, before the rest.
 test.serial("bounds every attempt with a fresh signal built from timeoutSeconds", async t => {
     const realTimeout = AbortSignal.timeout;

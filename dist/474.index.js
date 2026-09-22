@@ -183,13 +183,14 @@ __webpack_unused_export__ = defaultContentType
 /***/ 6474:
 /***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) => {
 
+// ESM COMPAT FLAG
+__webpack_require__.r(__webpack_exports__);
 
 // EXPORTS
 __webpack_require__.d(__webpack_exports__, {
+  context: () => (/* binding */ github_context),
   getOctokit: () => (/* binding */ getOctokit)
 });
-
-// UNUSED EXPORTS: context
 
 // EXTERNAL MODULE: external "fs"
 var external_fs_ = __webpack_require__(9896);

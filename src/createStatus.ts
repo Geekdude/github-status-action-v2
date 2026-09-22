@@ -23,11 +23,15 @@ type ErrorHeaders = Record<string, string | string[] | number | undefined>;
 
 interface StatusErrorLike {
     status?: number;
-    headers?: ErrorHeaders;
     response?: {
         headers?: ErrorHeaders;
     };
 }
+
+// Never wait longer than retryDelaySeconds' own upper bound (see main.ts), so
+// a large or misconfigured Retry-After / x-ratelimit-reset can't reopen the
+// hang that bound is meant to prevent.
+const MAX_RATE_LIMIT_DELAY_SECONDS = 300;
 
 function getHeader(headers: ErrorHeaders | undefined, name: string): string | undefined {
     if (!headers) {
@@ -49,7 +53,7 @@ function getHeader(headers: ErrorHeaders | undefined, name: string): string | un
 
 function getRateLimitHeaders(error: unknown): ErrorHeaders | undefined {
     const statusError = error as StatusErrorLike | undefined;
-    return statusError?.response?.headers ?? statusError?.headers;
+    return statusError?.response?.headers;
 }
 
 function getRateLimitDelaySeconds(error: unknown): number | undefined {
@@ -58,12 +62,12 @@ function getRateLimitDelaySeconds(error: unknown): number | undefined {
     if (retryAfter) {
         const seconds = Number(retryAfter);
         if (Number.isFinite(seconds) && seconds >= 0) {
-            return Math.ceil(seconds);
+            return Math.min(Math.ceil(seconds), MAX_RATE_LIMIT_DELAY_SECONDS);
         }
 
         const retryDate = Date.parse(retryAfter);
         if (Number.isFinite(retryDate)) {
-            return Math.max(0, Math.ceil((retryDate - Date.now()) / 1000));
+            return Math.min(Math.max(0, Math.ceil((retryDate - Date.now()) / 1000)), MAX_RATE_LIMIT_DELAY_SECONDS);
         }
     }
 
@@ -83,7 +87,7 @@ function getRateLimitDelaySeconds(error: unknown): number | undefined {
 
     const currentDateHeader = getHeader(headers, 'date');
     const currentTimeSeconds = currentDateHeader ? Date.parse(currentDateHeader) / 1000 : Date.now() / 1000;
-    return Math.max(0, Math.ceil(resetSeconds - currentTimeSeconds));
+    return Math.min(Math.max(0, Math.ceil(resetSeconds - currentTimeSeconds)), MAX_RATE_LIMIT_DELAY_SECONDS);
 }
 
 function isRateLimited(error: unknown): boolean {
@@ -113,6 +117,13 @@ export function isTransient(error: unknown): boolean {
     return status === 408 || isRateLimited(error) || status >= 500;
 }
 
+function withAttemptsMade(error: unknown, attemptsMade: number): unknown {
+    if (error && typeof error === 'object') {
+        (error as { attemptsMade?: number }).attemptsMade = attemptsMade;
+    }
+    return error;
+}
+
 export default async function createStatusWithRetry(
     octokit: OctokitForStatus,
     statusRequest: StatusRequest,
@@ -128,12 +139,12 @@ export default async function createStatusWithRetry(
         try {
             await octokit.rest.repos.createCommitStatus({
                 ...statusRequest,
-                request: { signal: AbortSignal.timeout(timeoutSeconds * 1000) },
+                request: { ...statusRequest.request, signal: AbortSignal.timeout(timeoutSeconds * 1000) },
             });
             return;
         } catch (error) {
             if (!isTransient(error)) {
-                throw error;
+                throw withAttemptsMade(error, attempt);
             }
             lastError = error;
             if (attempt < attempts) {
@@ -142,5 +153,5 @@ export default async function createStatusWithRetry(
         }
     }
 
-    throw lastError;
+    throw withAttemptsMade(lastError, attempts);
 }
