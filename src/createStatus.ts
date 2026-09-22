@@ -67,6 +67,10 @@ function getRateLimitDelaySeconds(error: unknown): number | undefined {
         }
     }
 
+    if (getHeader(headers, 'x-ratelimit-remaining') !== '0') {
+        return undefined;
+    }
+
     const resetAt = getHeader(headers, 'x-ratelimit-reset');
     if (!resetAt) {
         return undefined;
