@@ -23,7 +23,9 @@ Adds a status update to a commit. GitHub will always show the latest state of a 
 - `authToken` (required)  
   Use secrets.GITHUB_TOKEN or your own token if you need to trigger other workflows that use "on: status"
 - `state` (required)  
-  The status of the check should only be `success`, `error`, `failure` or `pending`
+  The status of the check should only be `success`, `error`, `failure`, `pending`, or `cancelled`.
+  `cancelled` is accepted as an input but mapped to `error` before it reaches GitHub, since
+  GitHub's commit-status API has no `cancelled` state of its own.
 - `context`  
   The context, is displayed as the name of the check
 - `description`  
@@ -37,6 +39,27 @@ Adds a status update to a commit. GitHub will always show the latest state of a 
   \*If using `on: pull_request` use `github.event.pull_request.head.sha`
 - `target_url`  
   Url to use for the details link. If omitted no link is shown.
+- `retries`  
+  Number of retries after a failed attempt, so the step makes up to `retries + 1`
+  requests in total (the same counting as `curl --retry N`). Defaults to `3`.
+  Set to `0` to attempt the request once and fail. Must be between `0` and `10`;
+  an out-of-range value falls back to the default rather than hanging the step.
+  Only transient failures are retried: network errors, the per-attempt timeout
+  firing, `408`, `429`, rate-limited `403` responses, and any `5xx`. A `4xx`
+  such as `403 Resource not accessible by integration` or `422` fails the step
+  immediately, since another identical request cannot succeed.
+- `retryDelaySeconds`  
+  Delay in seconds between retry attempts. Defaults to `5`. `0` is valid and
+  retries with no delay. Must be between `0` and `300`; an out-of-range value
+  falls back to the default.
+- `timeoutSeconds`  
+  Per-attempt request timeout in seconds, applied as a fresh `AbortSignal` on
+  every attempt. Defaults to `30`. Must be between `1` and `300`; an
+  out-of-range value falls back to the default.
+
+### Outputs
+
+None.
 
 ## Local Debugging with @github/local-action
 
