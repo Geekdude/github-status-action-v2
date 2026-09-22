@@ -45,9 +45,9 @@ Adds a status update to a commit. GitHub will always show the latest state of a 
   Set to `0` to attempt the request once and fail. Must be between `0` and `10`;
   an out-of-range value falls back to the default rather than hanging the step.
   Only transient failures are retried: network errors, the per-attempt timeout
-  firing, `408`, `429`, and any `5xx`. A `4xx` such as `403 Resource not
-  accessible by integration` or `422` fails the step immediately, since another
-  identical request cannot succeed.
+  firing, `408`, `429`, rate-limited `403` responses, and any `5xx`. A `4xx`
+  such as `403 Resource not accessible by integration` or `422` fails the step
+  immediately, since another identical request cannot succeed.
 - `retryDelaySeconds`  
   Delay in seconds between retry attempts. Defaults to `5`. `0` is valid and
   retries with no delay. Must be between `0` and `300`; an out-of-range value

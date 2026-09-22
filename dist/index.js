@@ -54,6 +54,9 @@ function getRateLimitDelaySeconds(error) {
             return Math.max(0, Math.ceil((retryDate - Date.now()) / 1000));
         }
     }
+    if (getHeader(headers, 'x-ratelimit-remaining') !== '0') {
+        return undefined;
+    }
     const resetAt = getHeader(headers, 'x-ratelimit-reset');
     if (!resetAt) {
         return undefined;
